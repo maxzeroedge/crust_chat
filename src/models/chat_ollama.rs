@@ -5,6 +5,7 @@ use serde::{Serialize, Deserialize};
 #[serde(rename_all="lowercase")]
 pub enum MessageRole {
     ASSISTANT,
+    TOOL,
     USER
 }
 

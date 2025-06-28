@@ -1,1 +1,1 @@
-pub mod mcp;
+pub mod main;
