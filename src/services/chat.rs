@@ -19,8 +19,10 @@ use crate::models::chat_ollama::{
 use crate::tools::base_tool::{get_available_tool_definitions, run_respective_tools};
 
 // const MODEL_NAME: &str = "gemma3:4b-it-q4_K_M"; // Doesn't support tools
-const MODEL_NAME: &str = "llama3.2:1b";
-const IMAGE_MODEL_NAME: &str = "llava-phi3:3.8b";
+// const MODEL_NAME: &str = "qwen3:1.7b";
+// const MODEL_NAME: &str = "llama3.2:3b-instruct-q5_1";
+const MODEL_NAME: &str = "gpt-oss:latest";
+const IMAGE_MODEL_NAME: &str = "llama3.2-vision:11b-instruct-q4_K_M";
 const OLLAMA_SERVER_URL: &str = "http://localhost:11434";
 
 pub async fn loop_chat(history: &Vec<OllamaMessage>, system_prompt: String, start_message: &str) {
@@ -46,7 +48,7 @@ pub async fn loop_chat(history: &Vec<OllamaMessage>, system_prompt: String, star
         new_history.last().unwrap().content,
         (end_time - start_time).num_milliseconds()
     );
-    println!("{}", next_start_message);
+    log::info!("{}", next_start_message);
 
     Box::pin(async {
         loop_chat(&new_history, system_prompt, next_start_message.as_str()).await
@@ -73,7 +75,7 @@ fn encode_file(file_path: &str) -> std::io::Result<String> {
 }
 
 async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, system_prompt: String) -> Result<Vec<OllamaMessage>, Box<dyn Error>> {
-    // println!("{}", message["content"]);
+    // log::info!("{}", message["content"]);
     let history_message = OllamaMessage {
         role: OllamaMessageRole::USER,
         content: message.content,
@@ -130,7 +132,7 @@ async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, s
     });
     // data.insert("suffix", " Respond as JSON with only one key: answer. Never include extra keys such as description or anything");
     
-    println!("Checking....");
+    log::info!("Checking....");
     
     let url = String::from(OLLAMA_SERVER_URL).to_owned() + "/api/chat";
     let response = Client::new().post(url)
@@ -138,21 +140,20 @@ async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, s
         .headers(headers.clone())
         .send()
         .await?;
-    // println!("Ok, so....");
 
     match response.status() {
         StatusCode::INTERNAL_SERVER_ERROR => {
-            println!("{:?}", response.text().await.unwrap());
+            log::error!("{:?}", response.text().await.unwrap());
             return Err("Server Error".into());
         }
         StatusCode::BAD_REQUEST => {
-            println!("{:?}", response.text().await.unwrap());
+            log::error!("{:?}", response.text().await.unwrap());
             return Err("Bad Request".into());
         }
         _ => {
             match response.json::<serde_json::Value>().await {
                 Ok(response_json) => {
-                    println!("{:?}", response_json["message"]);
+                    log::info!("{:?}", response_json["message"]);
                     let message = response_json["message"].as_object().unwrap();
                     let mut content = response_json["message"].get("content").unwrap().to_string();
                     if message.contains_key("tool_calls") {
@@ -166,7 +167,7 @@ async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, s
                     return Ok(mut_history);
                 }
                 Err(e) => {
-                    println!("Got an error {:?}", e.status());
+                    log::error!("Got an error {:?}", e.status());
                     return Err(e.into());
                 }
             }

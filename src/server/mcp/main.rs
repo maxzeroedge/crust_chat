@@ -5,7 +5,7 @@ fn main() {
     let server_name = env::args().nth(1).unwrap_or("localhost".to_string());
     let port = 8080;
     let timeout = 30;
-    println!("You specified: {}", server_name);
+    log::info!("You specified: {}", server_name);
 
     if server_name == "MCP server" {
         setup_mcp_server(&server_name, port, timeout);
@@ -28,14 +28,14 @@ fn setup_mcp_server(server_name: &str, _port: u32, _timeout: u32) {
     let device_config_path = device_config_path;
     // Update MCP user configuration
     match set_mcp_user_config(&user_config_path, &device_config_path) {
-        Ok(()) => println!("MCP user configuration updated"),
-        Err(err) => eprintln!("Error updating MCP user configuration: {}", err),
+        Ok(()) => log::info!("MCP user configuration updated"),
+        Err(err) => log::error!("Error updating MCP user configuration: {}", err),
     }
 
     // Update MCP device configuration
     match set_device_config(&device_config_path, "MCP server") {
-        Ok(()) => println!("MCP device configuration updated"),
-        Err(err) => eprintln!("Error updating MCP device configuration: {}", err),
+        Ok(()) => log::info!("MCP device configuration updated"),
+        Err(err) => log::error!("Error updating MCP device configuration: {}", err),
     }
     // TODO: Setup server
 }

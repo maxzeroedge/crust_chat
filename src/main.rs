@@ -3,7 +3,8 @@ use cli_chat::services::chat::loop_chat;
 
 #[tokio::main]
 async fn main() {
-    println!("Hi. How may I help you today?");
+    simple_logger::init_with_level(log::Level::Info).unwrap();
+    log::info!("Hi. How may I help you today?");
 
     // let mut message: String = String::from("What is the answer to life, universe and everything?");
     let history: Vec<OllamaMessage> = Vec::new();
