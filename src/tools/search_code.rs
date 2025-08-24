@@ -1,7 +1,10 @@
+use async_trait::async_trait;
 use serde_json;
 
 use super::base_tool::BaseTool;
 use super::tool_structs::SearchCode;
+
+#[async_trait]
 
 impl BaseTool for SearchCode {
     fn get_tool_call(&self) -> serde_json::Value{
@@ -28,7 +31,7 @@ impl BaseTool for SearchCode {
                     // "required": ["city", "country_code"]
     }
 
-    fn run_tool(&self, params: serde_json::Value) -> String {
+    async fn run_tool(&self, params: serde_json::Value) -> String {
         return format!("The tool to search code was called with params {:?}", params);
     }
 }

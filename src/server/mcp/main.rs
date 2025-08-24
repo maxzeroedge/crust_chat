@@ -1,7 +1,8 @@
 use std::env;
 use std::fs;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let server_name = env::args().nth(1).unwrap_or("localhost".to_string());
     let port = 8080;
     let timeout = 30;

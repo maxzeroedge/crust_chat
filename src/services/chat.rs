@@ -16,7 +16,7 @@ use crate::models::chat_ollama::{
     EncodedFile, Message as OllamaMessage, MessageRole as OllamaMessageRole
 };
 
-use crate::tools::base_tool::{get_available_tool_definitions, run_respective_tools};
+use crate::tools::base_tool::BaseToolCall;
 
 // const MODEL_NAME: &str = "gemma3:4b-it-q4_K_M"; // Doesn't support tools
 // const MODEL_NAME: &str = "qwen3:1.7b";
@@ -121,6 +121,8 @@ async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, s
         model_name = IMAGE_MODEL_NAME;
     }
 
+    let tool_manager = BaseToolCall::new();
+
     let data = serde_json::json!({
             "model": model_name,
             "messages": mut_history,
@@ -128,7 +130,7 @@ async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, s
             "stream": false,
             "images": images,
             "suffix": " Keep answers precise",
-            "tools": get_available_tool_definitions(),
+            "tools": tool_manager.get_available_tool_definitions(),
     });
     // data.insert("suffix", " Respond as JSON with only one key: answer. Never include extra keys such as description or anything");
     
@@ -157,7 +159,7 @@ async fn chat_with_ollama(message: OllamaMessage, history: Vec<OllamaMessage>, s
                     let message = response_json["message"].as_object().unwrap();
                     let mut content = response_json["message"].get("content").unwrap().to_string();
                     if message.contains_key("tool_calls") {
-                        content = run_respective_tools(message["tool_calls"].as_array().unwrap().to_vec());
+                        content = tool_manager.run_respective_tools(message["tool_calls"].as_array().unwrap().to_vec()).await;
                     }
                     mut_history.push(OllamaMessage {
                         role: OllamaMessageRole::ASSISTANT,

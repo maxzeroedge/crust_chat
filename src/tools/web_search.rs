@@ -3,15 +3,18 @@ use std::error::Error;
 use serde_json;
 use thirtyfour::prelude::*;
 
+use async_trait::async_trait;
 use super::base_tool::BaseTool;
 use super::tool_structs::WebSearch;
+
+#[async_trait]
 
 impl BaseTool for WebSearch {
     fn get_tool_call(&self) -> serde_json::Value{
         return serde_json::from_str(r#"{
             "type": "function",
             "function": {
-                "name": "search_code",
+                "name": "web_search",
                 "description": "Search the internet, using webscraping for being updated with the information",
                 "parameters": {
                     "type": "object",
@@ -27,13 +30,10 @@ impl BaseTool for WebSearch {
                     // "required": ["city", "country_code"]
     }
 
-    fn run_tool(&self, params: serde_json::Value) -> String {
-        // TODO: Implement webdriver
+    async fn run_tool(&self, params: serde_json::Value) -> String {
         log::info!("The tool to search the web was called with params {:?}", params);
-        let tokio_runtime = tokio::runtime::Runtime::new().unwrap();
-        let future = WebEngine::search_web(params["query"].to_string());
-        tokio_runtime.block_on(future);
-        return format!("The tool to search the web was called with params {:?}", params);
+        let response = WebEngine::search_web(params["query"].to_string()).await;
+        return response.unwrap();
     }
 
 }
@@ -41,7 +41,7 @@ impl BaseTool for WebSearch {
 struct WebEngine {}
 
 impl WebEngine {
-    async fn search_web(query: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn search_web(query: String) -> Result<String, Box<dyn Error + Send + Sync>> {
         let caps = DesiredCapabilities::chrome();
         let driver = WebDriver::new("https://google.com", caps).await?;
 
@@ -54,12 +54,12 @@ impl WebEngine {
 
 
         // Look for header to implicitly wait for the page to load.
-        driver.query(By::Id("search")).first().await?;
+        let elem_result = driver.query(By::Css("#search > div > div > div:nth-child(2) > div > div")).first().await?.text().await?;
 
         // Always explicitly close the browser.
         driver.quit().await?;
 
-        Ok(())
+        Ok(elem_result)
     }
 
 }
