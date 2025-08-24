@@ -42,11 +42,14 @@ struct WebEngine {}
 
 impl WebEngine {
     async fn search_web(query: String) -> Result<String, Box<dyn Error + Send + Sync>> {
-        let caps = DesiredCapabilities::chrome();
-        let driver = WebDriver::new("https://google.com", caps).await?;
+        let mut caps = DesiredCapabilities::chrome();
+        caps.set_binary("/run/current-system/sw/bin/google-chrome-stable")?; 
+        let driver = WebDriver::new("http://localhost:44295", caps).await?;
+
+        driver.goto("https://duckduckgo.com/").await?;
 
         let elem_text = driver.query(
-            By::Css("textarea")
+            By::Id("searchbox_input")
         ).first().await?;
         // Type in the search terms.
         elem_text.send_keys(query).await?;
@@ -54,7 +57,7 @@ impl WebEngine {
 
 
         // Look for header to implicitly wait for the page to load.
-        let elem_result = driver.query(By::Css("#search > div > div > div:nth-child(2) > div > div")).first().await?.text().await?;
+        let elem_result = driver.query(By::Id("react-layout")).first().await?.text().await?;
 
         // Always explicitly close the browser.
         driver.quit().await?;
