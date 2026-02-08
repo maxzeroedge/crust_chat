@@ -1,8 +1,9 @@
 use std::vec::Vec;
 use std::collections::HashMap;
+use adk_rust::tool::FunctionTool;
 use async_trait::async_trait;
 
-use super::tool_structs::{SearchCode, OpensearchKnowledgeBase, WebSearch};
+use super::tool_structs::{DocumentParser, OpensearchKnowledgeBase, SearchCode, WebSearch};
 
 
 #[async_trait]
@@ -11,6 +12,11 @@ pub trait BaseTool {
     // Get tool call definition to be used in api
     fn get_tool_call(&self) -> serde_json::Value;
     async fn run_tool(&self, params: serde_json::Value) -> String;
+
+    // Optional ADK FunctionTool definition for tools that support runtime registration.
+    fn get_tool(&self) -> Option<FunctionTool> {
+        None
+    }
 }
 
 
@@ -24,6 +30,7 @@ impl<'a> BaseToolCall<'a> {
         available_tools.insert("search_code", Box::new(SearchCode {}));
         available_tools.insert("search_knowledge_base", Box::new(OpensearchKnowledgeBase {}));
         available_tools.insert("web_search", Box::new(WebSearch {}));
+        available_tools.insert("parse_documents", Box::new(DocumentParser {}));
 
         Self {
             available_tools,

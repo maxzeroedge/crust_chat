@@ -4,17 +4,25 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-async-trait = "0.1.81"
+async-trait = "0.1.89"
 base64 = "0.22.1"
-chrono = "0.4.41"
+chrono = "0.4.43"
 mime_guess = "2.0.5"
-reqwest = { version = "0.12", features = ["json"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
-thirtyfour = "0.35.0"
-tokio = { version = "1.45.0", features = ["full"] }
-log = "0.4.22"
-simple_logger = "5.0.0"
+reqwest = { version = "0.13.2", features = ["json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thirtyfour = "0.36.1"
+tokio = { version = "1.49.0", features = ["full"] }
+log = "0.4.29"
+simple_logger = "5.1.0"
+anyhow = "1.0.101"
+adk-model = { version = "0.2.1", features = ["ollama", "anthropic"] }
+adk-rust = "0.2.1"
+dotenvy = "0.15.7"
+adk-agent = "0.2.1"
+extractous = "0.3.0"
+schemars = "1.2.1"
+rig-core = "0.30.0"
 # cli_chat = { path = "src/lib.rs" }
 # entrypoints = [
 #     # Server entrypoint
@@ -35,5 +43,8 @@ simple_logger = "5.0.0"
 #     }
 # ]
 
-# [profile dev]
-# debug = false
+[profile.dev]
+debug = true
+
+[profile.release]
+debug = false
