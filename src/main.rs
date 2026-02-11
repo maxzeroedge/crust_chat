@@ -1,29 +1,61 @@
-// use cli_chat::models::chat_ollama::Message as OllamaMessage;
-// use cli_chat::services::chat::loop_chat;
-
-// #[tokio::main]
-// async fn main() {
-//     simple_logger::init_with_level(log::Level::Info).unwrap();
-//     log::info!("Hi. How may I help you today?");
-
-//     // let mut message: String = String::from("What is the answer to life, universe and everything?");
-//     let history: Vec<OllamaMessage> = Vec::new();
-//     let system_prompt = String::from("You are a helpful assistant, who keeps the answers crisp and precise");
-//     loop_chat(&history, system_prompt.clone(), "Hi. How may I help you today?").await;
-// }
-
 use adk_model::ollama::{OllamaModel, OllamaConfig};
 use adk_agent::LlmAgentBuilder;
 use adk_rust::Launcher;
 use cli_chat::tools::base_tool::BaseTool;
 use cli_chat::tools::tool_structs::DocumentParser;
+use cli_chat::models::chat_ollama::Message as OllamaMessage;
+use cli_chat::services::chat::loop_chat;
 use std::sync::Arc;
+
+use clap::Parser;
+
+#[derive(Parser)]
+struct Cli {
+    #[arg(short, long)]
+    operation: String,
+    #[arg()]
+    path: Option<std::path::PathBuf>,
+}
+
 
 const OLLAMA_HOST: &str = "http://0.0.0.0:11434";
 const MODEL: &str = "llama3.2";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+
+    let Cli { operation, path } = Cli::parse();
+    println!("operation: {}", operation);
+
+    match operation.as_str() {
+        "simple" => simple_chat_operation().await,
+        "chat" => chat_operation().await,
+        "loader" => {
+            let file_path = path.ok_or_else(|| anyhow::anyhow!("`path` is required when operation is `loader`"))?;
+            loader_operation(file_path).await
+        }
+        _ => {
+            println!("Use simple, chat, or loader as operation");
+            Ok(())
+        },
+    }
+
+}
+
+async fn simple_chat_operation() -> anyhow::Result<()> {
+    simple_logger::init_with_level(log::Level::Info).unwrap();
+    log::info!("Hi. How may I help you today?");
+
+    // let mut message: String = String::from("What is the answer to life, universe and everything?");
+    let history: Vec<OllamaMessage> = Vec::new();
+    let system_prompt = String::from("You are a helpful assistant, who keeps the answers crisp and precise");
+    loop_chat(&history, system_prompt.clone(), "Hi. How may I help you today?").await;
+
+    Ok(())
+
+}
+
+async fn chat_operation() -> anyhow::Result<()> {
     let config: OllamaConfig = OllamaConfig::with_host(OLLAMA_HOST, MODEL);
     let model = OllamaModel::new(config)?;
 
@@ -34,7 +66,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .tool(Arc::new((DocumentParser {}).get_tool().unwrap()))
         .build()?;
-    Launcher::new(Arc::new(agent)).run().await?;
+    // Launcher::new(Arc::new(agent)).run().await?;
 
+    Ok(())
+}
+
+async fn loader_operation(file_path: std::path::PathBuf) -> anyhow::Result<()> {
+    println!("{:?}", file_path);
     Ok(())
 }

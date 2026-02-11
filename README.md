@@ -1,0 +1,3 @@
+### RA-CL
+The project aims at building a command line interface for a hybrid RAG implementation, that implements both vector store and a graph database. It uses different document parsing utilities in Rust to read the files based on type. It also supports reading code by first converting it to an Abstract Syntax Tree using existing utilities and then storing the entities into a vector database and the entities and their relationships into a graph database.
+The ultimate goal is to be able to use the CLI Chat interface as simplified reference manual

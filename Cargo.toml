@@ -23,6 +23,7 @@ adk-agent = "0.2.1"
 extractous = "0.3.0"
 schemars = "1.2.1"
 rig-core = "0.30.0"
+clap = "4.5.58"
 # cli_chat = { path = "src/lib.rs" }
 # entrypoints = [
 #     # Server entrypoint
