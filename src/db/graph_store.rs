@@ -3,6 +3,55 @@ use std::env;
 
 use crate::parser::entity::*;
 
+/// Ensure the Neo4j database exists, creating it if necessary.
+/// On Community Edition (which only supports a single database), this is a no-op.
+async fn ensure_database_exists() -> anyhow::Result<()> {
+    dotenvy::dotenv_override().ok();
+
+    let host = env::var("NEO_4J_HOST")?;
+    let port = env::var("NEO_4J_BOLT_PORT")?;
+    let db = env::var("NEO_4J_DATABASE")?;
+    let user = env::var("NEO_4J_USER")?;
+    let pass = env::var("NEO_4J_PASS")?;
+
+    let uri = format!("bolt://{}:{}", host, port);
+
+    // Connect to the system database to manage databases
+    let config = ConfigBuilder::default()
+        .uri(&uri)
+        .user(&user)
+        .password(&pass)
+        .db("system".to_string())
+        .build()?;
+
+    let graph = Graph::connect(config).await?;
+
+    // Check if database exists
+    let result = graph
+        .execute(query("SHOW DATABASES YIELD name WHERE name = $name RETURN name").param("name", db.clone()))
+        .await;
+
+    match result {
+        Ok(mut rows) => {
+            let exists = rows.next().await?.is_some();
+            if !exists {
+                println!("Creating Neo4j database '{}'...", db);
+                graph
+                    .run(query(&format!("CREATE DATABASE `{}` IF NOT EXISTS", db)))
+                    .await?;
+                println!("Neo4j database '{}' created", db);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+        Err(_) => {
+            // Community Edition doesn't support SHOW DATABASES / CREATE DATABASE.
+            // The default 'neo4j' database is always available.
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn init_graph() -> anyhow::Result<Graph> {
     dotenvy::dotenv_override().ok();
 
@@ -13,6 +62,10 @@ pub async fn init_graph() -> anyhow::Result<Graph> {
     let pass = env::var("NEO_4J_PASS")?;
 
     let uri = format!("bolt://{}:{}", host, port);
+
+    // Try to ensure database exists (no-op on Community Edition)
+    ensure_database_exists().await?;
+
     let config = ConfigBuilder::default()
         .uri(&uri)
         .user(&user)
@@ -84,21 +137,19 @@ pub async fn store_relationships(
 ) -> anyhow::Result<()> {
     for rel in relationships {
         let rel_type = rel.relationship_type.neo4j_type();
-        // Use OPTIONAL MATCH for the target since it may not exist yet (cross-file refs)
         let cypher = format!(
             "MATCH (a:CodeEntity {{qualified_name: $from}})
              MATCH (b:CodeEntity {{qualified_name: $to}})
              MERGE (a)-[:{}]->(b)",
             rel_type
         );
-        // Silently skip if either node doesn't exist
-        let _ = graph
+        graph
             .run(
                 query(&cypher)
                     .param("from", rel.from_qualified_name.clone())
                     .param("to", rel.to_qualified_name.clone()),
             )
-            .await;
+            .await?;
     }
     Ok(())
 }

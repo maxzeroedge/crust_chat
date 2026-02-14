@@ -3,6 +3,7 @@ use cli_chat::services::chat::loop_chat;
 use cli_chat::handler::data_loader::load_embed_and_store;
 use cli_chat::services::rag::generate_rag_response;
 use cli_chat::db::vector_store::{init_pool, init_schema};
+use cli_chat::db::graph_store::init_graph;
 
 use clap::Parser;
 
@@ -23,6 +24,9 @@ async fn main() -> anyhow::Result<()> {
     let Cli { operation, path, force } = Cli::parse();
     println!("operation: {}", operation);
 
+    // Verify database connections on startup
+    check_connections().await?;
+
     match operation.as_str() {
         "simple" => simple_chat_operation().await,
         "chat" => chat_operation().await,
@@ -36,6 +40,21 @@ async fn main() -> anyhow::Result<()> {
         },
     }
 
+}
+
+async fn check_connections() -> anyhow::Result<()> {
+    print!("Checking PostgreSQL...  ");
+    let pool = init_pool().await?;
+    sqlx::query("SELECT 1").execute(&pool).await?;
+    println!("OK");
+
+    print!("Checking Neo4j...       ");
+    let graph = init_graph().await?;
+    graph.run(neo4rs::query("RETURN 1")).await?;
+    println!("OK");
+
+    println!();
+    Ok(())
 }
 
 async fn simple_chat_operation() -> anyhow::Result<()> {
@@ -100,21 +119,13 @@ async fn loader_operation(path: std::path::PathBuf, force: bool) -> anyhow::Resu
     } else if path.is_dir() {
         let files = collect_files(&path)?;
         println!("Found {} files in {}\n", files.len(), path.display());
-        let mut success = 0;
-        let mut failed = 0;
         for (i, file) in files.iter().enumerate() {
             let file_str = file.to_string_lossy();
             println!("[{}/{}] {}", i + 1, files.len(), file_str);
-            match load_embed_and_store(&file_str, force).await {
-                Ok(_) => success += 1,
-                Err(e) => {
-                    eprintln!("  Error: {}", e);
-                    failed += 1;
-                }
-            }
+            load_embed_and_store(&file_str, force).await?;
             println!();
         }
-        println!("Done: {} succeeded, {} failed out of {} files", success, failed, files.len());
+        println!("Done: {} files processed successfully", files.len());
     } else {
         anyhow::bail!("Path does not exist: {}", path.display());
     }
