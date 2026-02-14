@@ -4,3 +4,5 @@ The ultimate goal is to be able to use the CLI Chat interface as simplified refe
 
 
 Run with `cargo run -- --operation chat`
+
+Load data like: `cargo run -- --operation loader --path "/home/pc/Downloads/Programming Rust 2nd Edition.pdf"`

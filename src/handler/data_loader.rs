@@ -55,7 +55,17 @@ pub async fn embed_texts(texts: Vec<String>) -> anyhow::Result<EmbeddingResult> 
         .documents(texts)?
         .build()
         .await?;
-    Ok(embeddings)
+    // Truncate to EMBEDDING_NDIMS (rig's Ollama provider doesn't send ndims to the API)
+    let truncated = embeddings
+        .into_iter()
+        .map(|(text, emb)| {
+            let e = emb.first();
+            let truncated_vec: Vec<f64> = e.vec.into_iter().take(EMBEDDING_NDIMS).collect();
+            let doc = e.document.clone();
+            (text, OneOrMany::one(Embedding { document: doc, vec: truncated_vec }))
+        })
+        .collect();
+    Ok(truncated)
 }
 
 /// Generate embedding for a single query
@@ -70,7 +80,7 @@ pub async fn embed_query(query: &str) -> anyhow::Result<Vec<f32>> {
     let (_, embedding) = embeddings.into_iter().next()
         .ok_or_else(|| anyhow::anyhow!("No embedding generated"))?;
 
-    let vec: Vec<f32> = embedding.first().vec.into_iter().map(|x| x as f32).collect();
+    let vec: Vec<f32> = embedding.first().vec.into_iter().take(EMBEDDING_NDIMS).map(|x| x as f32).collect();
     Ok(vec)
 }
 
