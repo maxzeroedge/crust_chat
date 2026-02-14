@@ -128,7 +128,13 @@ pub async fn load_and_embed(file_path: &str) -> anyhow::Result<EmbeddingResult> 
 
 /// Load a file, generate embeddings, and store them in PostgreSQL
 /// If `force` is false and the file was already processed, skips loading.
+/// Code files are automatically detected and routed to the code-specific pipeline.
 pub async fn load_embed_and_store(file_path: &str, force: bool) -> anyhow::Result<usize> {
+    // Route code files to the code-specific pipeline
+    if let Some(lang) = crate::parser::detect_language(file_path) {
+        return crate::handler::code_loader::load_code_and_store(file_path, lang, force).await;
+    }
+
     use crate::db::vector_store::{init_pool, init_schema, store_embeddings, file_exists};
 
     let total_start = Instant::now();

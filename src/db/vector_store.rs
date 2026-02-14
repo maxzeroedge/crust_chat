@@ -89,6 +89,9 @@ pub async fn init_schema(pool: &PgPool) -> anyhow::Result<()> {
             content TEXT NOT NULL,
             embedding vector(512),
             source_file TEXT,
+            entity_type TEXT,
+            entity_name TEXT,
+            language TEXT,
             created_at TIMESTAMP DEFAULT NOW()
         )
         "#,
@@ -96,11 +99,28 @@ pub async fn init_schema(pool: &PgPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Migration: add columns if table already exists without them
+    sqlx::query("ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS entity_type TEXT")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS entity_name TEXT")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS language TEXT")
+        .execute(pool)
+        .await?;
+
     sqlx::query(
         r#"
         CREATE INDEX IF NOT EXISTS embeddings_idx ON embeddings
         USING hnsw (embedding vector_cosine_ops)
         "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS embeddings_entity_type_idx ON embeddings (entity_type)",
     )
     .execute(pool)
     .await?;
@@ -159,6 +179,43 @@ pub async fn store_embeddings(
         .bind(&content)
         .bind(&vector)
         .bind(source_file)
+        .execute(pool)
+        .await?;
+
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Store code entity embeddings with metadata
+pub async fn store_code_embeddings(
+    pool: &PgPool,
+    embeddings: EmbeddingResult,
+    source_file: &str,
+    entity_type: &str,
+    entity_name: &str,
+    language: &str,
+) -> anyhow::Result<usize> {
+    let mut count = 0;
+
+    for (content, embedding_data) in embeddings {
+        let embedding = embedding_data.first();
+        let vec: Vec<f32> = embedding.vec.into_iter().map(|x| x as f32).collect();
+        let vector = Vector::from(vec);
+
+        sqlx::query(
+            r#"
+            INSERT INTO embeddings (content, embedding, source_file, entity_type, entity_name, language)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(&content)
+        .bind(&vector)
+        .bind(source_file)
+        .bind(entity_type)
+        .bind(entity_name)
+        .bind(language)
         .execute(pool)
         .await?;
 
