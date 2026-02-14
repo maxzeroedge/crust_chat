@@ -93,8 +93,82 @@ async fn chat_operation() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn loader_operation(file_path: std::path::PathBuf, force: bool) -> anyhow::Result<()> {
-    let path_str = file_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
-    load_embed_and_store(path_str, force).await?;
+async fn loader_operation(path: std::path::PathBuf, force: bool) -> anyhow::Result<()> {
+    if path.is_file() {
+        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
+        load_embed_and_store(path_str, force).await?;
+    } else if path.is_dir() {
+        let files = collect_files(&path)?;
+        println!("Found {} files in {}\n", files.len(), path.display());
+        let mut success = 0;
+        let mut failed = 0;
+        for (i, file) in files.iter().enumerate() {
+            let file_str = file.to_string_lossy();
+            println!("[{}/{}] {}", i + 1, files.len(), file_str);
+            match load_embed_and_store(&file_str, force).await {
+                Ok(_) => success += 1,
+                Err(e) => {
+                    eprintln!("  Error: {}", e);
+                    failed += 1;
+                }
+            }
+            println!();
+        }
+        println!("Done: {} succeeded, {} failed out of {} files", success, failed, files.len());
+    } else {
+        anyhow::bail!("Path does not exist: {}", path.display());
+    }
     Ok(())
+}
+
+/// Recursively collect all processable files from a directory
+fn collect_files(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    use cli_chat::parser::detect_language;
+
+    // Extensions supported by extractous (document files)
+    const DOC_EXTENSIONS: &[&str] = &[
+        "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
+        "txt", "md", "csv", "json", "xml", "html", "htm", "rtf", "odt",
+    ];
+
+    let mut files = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        let mut entries: Vec<_> = std::fs::read_dir(&current)?
+            .filter_map(|e| e.ok())
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                // Skip hidden dirs and common non-content dirs
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                if !name.starts_with('.')
+                    && name != "node_modules"
+                    && name != "target"
+                    && name != "__pycache__"
+                    && name != "venv"
+                    && name != ".git"
+                {
+                    stack.push(path);
+                }
+            } else if path.is_file() {
+                let path_str = path.to_string_lossy();
+                let is_code = detect_language(&path_str).is_some();
+                let is_doc = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| DOC_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+                    .unwrap_or(false);
+                if is_code || is_doc {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    files.sort();
+    Ok(files)
 }
