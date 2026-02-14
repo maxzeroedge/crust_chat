@@ -80,7 +80,7 @@ pub async fn init_schema(pool: &PgPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
-    sqlx::query("DROP TABLE IF EXISTS embeddings").execute(pool).await?;
+    // sqlx::query("DROP TABLE IF EXISTS embeddings").execute(pool).await?;
 
     sqlx::query(
         r#"
