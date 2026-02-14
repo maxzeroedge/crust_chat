@@ -2,10 +2,11 @@ use adk_model::ollama::{OllamaModel, OllamaConfig};
 use adk_agent::LlmAgentBuilder;
 use adk_rust::prelude::*;
 use adk_rust::session::{CreateRequest, SessionService};
-use cli_chat::tools::base_tool::BaseTool;
-use cli_chat::tools::tool_structs::DocumentParser;
+// use cli_chat::tools::base_tool::BaseTool;
+// use cli_chat::tools::tool_structs::DocumentParser;
 use cli_chat::models::chat_ollama::Message as OllamaMessage;
 use cli_chat::services::chat::loop_chat;
+use cli_chat::handler::data_loader::load_data;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -14,7 +15,7 @@ use clap::Parser;
 struct Cli {
     #[arg(short, long)]
     operation: String,
-    #[arg()]
+    #[arg(short, long)]
     path: Option<std::path::PathBuf>,
 }
 
@@ -152,5 +153,6 @@ async fn chat_operation() -> anyhow::Result<()> {
 
 async fn loader_operation(file_path: std::path::PathBuf) -> anyhow::Result<()> {
     println!("{:?}", file_path);
+    load_data(file_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?);
     Ok(())
 }
