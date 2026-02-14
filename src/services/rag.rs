@@ -3,6 +3,7 @@ use rig::client::{Nothing, CompletionClient};
 use rig::completion::Prompt;
 use sqlx::postgres::PgPool;
 use std::env;
+use std::time::Instant;
 
 use crate::db::vector_store::{search_similar, SearchResult};
 use crate::handler::data_loader::embed_query;
@@ -29,10 +30,16 @@ fn get_chat_client() -> Client {
 }
 
 /// Retrieve relevant context from the vector store
-pub async fn retrieve_context(pool: &PgPool, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+pub async fn retrieve_context(pool: &PgPool, query: &str) -> anyhow::Result<(Vec<SearchResult>, f64, f64)> {
+    let t = Instant::now();
     let query_embedding = embed_query(query).await?;
+    let embed_time = t.elapsed().as_secs_f64();
+
+    let t = Instant::now();
     let results = search_similar(pool, query_embedding, TOP_K).await?;
-    Ok(results)
+    let search_time = t.elapsed().as_secs_f64();
+
+    Ok((results, embed_time, search_time))
 }
 
 /// Build context string from search results
@@ -63,8 +70,10 @@ fn build_context_string(contexts: &[SearchResult]) -> String {
 
 /// Generate a response using RAG
 pub async fn generate_rag_response(pool: &PgPool, query: &str) -> anyhow::Result<String> {
+    let total_start = Instant::now();
+
     // Retrieve relevant context
-    let contexts = retrieve_context(pool, query).await?;
+    let (contexts, embed_time, search_time) = retrieve_context(pool, query).await?;
 
     if contexts.is_empty() {
         return Ok("No relevant context found in the knowledge base.".to_string());
@@ -87,7 +96,15 @@ pub async fn generate_rag_response(pool: &PgPool, query: &str) -> anyhow::Result
         .preamble(&preamble)
         .build();
 
+    let t = Instant::now();
     let response = agent.prompt(query).await?;
+    let llm_time = t.elapsed().as_secs_f64();
+
+    let total_time = total_start.elapsed().as_secs_f64();
+    println!(
+        "\n[Profile] embed: {:.2}s | search: {:.2}s | llm: {:.2}s | total: {:.2}s",
+        embed_time, search_time, llm_time, total_time
+    );
 
     Ok(response)
 }
