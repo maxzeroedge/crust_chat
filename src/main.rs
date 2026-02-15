@@ -135,6 +135,7 @@ async fn loader_operation(path: std::path::PathBuf, force: bool) -> anyhow::Resu
 /// Recursively collect all processable files from a directory
 fn collect_files(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>> {
     use cli_chat::parser::detect_language;
+    use cli_chat::handler::image_loader::detect_image;
 
     // Extensions supported by extractous (document files)
     const DOC_EXTENSIONS: &[&str] = &[
@@ -168,12 +169,13 @@ fn collect_files(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf
             } else if path.is_file() {
                 let path_str = path.to_string_lossy();
                 let is_code = detect_language(&path_str).is_some();
+                let is_image = detect_image(&path_str);
                 let is_doc = path
                     .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| DOC_EXTENSIONS.contains(&e.to_lowercase().as_str()))
                     .unwrap_or(false);
-                if is_code || is_doc {
+                if is_code || is_doc || is_image {
                     files.push(path);
                 }
             }

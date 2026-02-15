@@ -1,4 +1,4 @@
-use extractous::Extractor;
+use extractous::{Extractor, PdfParserConfig, PdfOcrStrategy};
 use rig::providers::ollama::Client;
 use rig::client::{Nothing, EmbeddingsClient};
 use rig::embeddings::{EmbeddingsBuilder, Embedding};
@@ -32,14 +32,18 @@ pub type EmbeddingResult = Vec<(String, OneOrMany<Embedding>)>;
 
 /// Load text from a file
 pub fn load_data(file_path: &str) -> anyhow::Result<String> {
-    let extractor = Extractor::new();
+    let extractor = Extractor::new()
+        .set_pdf_config(
+            PdfParserConfig::new()
+                .set_ocr_strategy(PdfOcrStrategy::OCR_AND_TEXT_EXTRACTION),
+        );
     let (text, metadata) = extractor.extract_file_to_string(file_path)?;
     println!("Loaded file with metadata: {:?}", metadata);
     Ok(text)
 }
 
 /// Split text into chunks for embedding
-fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
+pub fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
     text.chars()
         .collect::<Vec<_>>()
         .chunks(chunk_size)
@@ -133,6 +137,11 @@ pub async fn load_embed_and_store(file_path: &str, force: bool) -> anyhow::Resul
     // Route code files to the code-specific pipeline
     if let Some(lang) = crate::parser::detect_language(file_path) {
         return crate::handler::code_loader::load_code_and_store(file_path, lang, force).await;
+    }
+
+    // Route image files to the image pipeline
+    if crate::handler::image_loader::detect_image(file_path) {
+        return crate::handler::image_loader::load_image_and_store(file_path, force).await;
     }
 
     use crate::db::vector_store::{init_pool, init_schema, store_embeddings, file_exists};
