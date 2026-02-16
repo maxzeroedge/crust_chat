@@ -25,12 +25,13 @@ pub fn detect_image(file_path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Send image bytes to Ollama vision model and get a description
+/// Send image bytes to vision model and get a description.
+/// Supports both Ollama and LM Studio (OpenAI-compatible) providers via VISION_PROVIDER env var.
 pub async fn describe_image_bytes(image_bytes: &[u8], prompt: &str) -> anyhow::Result<String> {
     dotenvy::dotenv_override().ok();
 
+    let provider = env::var("VISION_PROVIDER").unwrap_or_else(|_| "lmstudio".to_string());
     let host = env::var("VISION_MODEL_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let port = env::var("VISION_MODEL_PORT").unwrap_or_else(|_| "11434".to_string());
     let model = env::var("VISION_MODEL")?;
 
     let encoded = base64::Engine::encode(
@@ -38,29 +39,61 @@ pub async fn describe_image_bytes(image_bytes: &[u8], prompt: &str) -> anyhow::R
         image_bytes,
     );
 
-    let url = format!("http://{}:{}/api/chat", host, port);
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [{
-            "role": "user",
-            "content": prompt,
-            "images": [encoded]
-        }],
-        "stream": false
-    });
-
     let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await?;
+
+    let (url, body, auth_header) = match provider.to_lowercase().as_str() {
+        "ollama" => {
+            let port = env::var("VISION_MODEL_PORT").unwrap_or_else(|_| "11434".to_string());
+            let url = format!("http://{}:{}/api/chat", host, port);
+            let body = serde_json::json!({
+                "model": model,
+                "messages": [{
+                    "role": "user",
+                    "content": prompt,
+                    "images": [encoded]
+                }],
+                "stream": false
+            });
+            (url, body, None)
+        }
+        "lmstudio" | _ => {
+            let port = env::var("VISION_MODEL_PORT").unwrap_or_else(|_| "1234".to_string());
+            let api_key = env::var("VISION_API_KEY").unwrap_or_else(|_| "lm-studio".to_string());
+            let url = format!("http://{}:{}/v1/chat/completions", host, port);
+            let body = serde_json::json!({
+                "model": model,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        { "type": "text", "text": prompt },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": format!("data:image/png;base64,{}", encoded)
+                            }
+                        }
+                    ]
+                }],
+                "stream": false
+            });
+            (url, body, Some(format!("Bearer {}", api_key)))
+        }
+    };
+
+    let mut req = client.post(&url).json(&body);
+    if let Some(auth) = auth_header {
+        req = req.header("Authorization", auth);
+    }
+    let response = req.send().await?;
 
     let json: serde_json::Value = response.json().await?;
-    let description = json["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+
+    // Ollama: message.content, LM Studio/OpenAI: choices[0].message.content
+    let description = match provider.to_lowercase().as_str() {
+        "ollama" => json["message"]["content"].as_str().unwrap_or(""),
+        _ => json["choices"][0]["message"]["content"].as_str().unwrap_or(""),
+    }
+    .to_string();
 
     Ok(description)
 }

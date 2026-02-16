@@ -1,5 +1,4 @@
-use rig::providers::ollama::Client;
-use rig::client::{Nothing, CompletionClient};
+use rig::client::CompletionClient;
 use rig::completion::{Chat, Message};
 use sqlx::postgres::PgPool;
 use std::env;
@@ -8,26 +7,53 @@ use std::time::Instant;
 use crate::db::vector_store::{search_similar, SearchResult};
 use crate::handler::data_loader::embed_query;
 
-const RAG_MODEL: &str = "gemma3:12b-it-q4_K_M";
 const TOP_K: i64 = 10;
 const MIN_SIMILARITY: f64 = 0.5;
 const RAG_PREAMBLE: &str = r#"You are a helpful assistant that answers questions based on the provided context.
 Use the context to answer the user's question. If the context doesn't contain relevant information, say so.
 Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc. You must not invent anything new"#;
 
-/// Get chat Ollama client with configured host
-fn get_chat_client() -> Client {
+/// Chat with the LLM using the configured provider (ollama or lmstudio)
+async fn chat_with_provider(
+    query: &str,
+    preamble: &str,
+    chat_history: Vec<Message>,
+) -> anyhow::Result<String> {
     dotenvy::dotenv_override().ok();
 
+    let provider = env::var("CHAT_PROVIDER").unwrap_or_else(|_| "lmstudio".to_string());
     let host = env::var("CHAT_MODEL_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let port = env::var("CHAT_MODEL_PORT").unwrap_or_else(|_| "11434".to_string());
-    let base_url = format!("http://{}:{}", host, port);
+    let model = env::var("CHAT_MODEL").unwrap_or_else(|_| "gemma3:12b-it-q4_K_M".to_string());
 
-    Client::builder()
-        .api_key(Nothing)
-        .base_url(&base_url)
-        .build()
-        .expect("Failed to create chat client")
+    match provider.to_lowercase().as_str() {
+        "ollama" => {
+            let port = env::var("CHAT_MODEL_PORT").unwrap_or_else(|_| "11434".to_string());
+            let base_url = format!("http://{}:{}", host, port);
+
+            let client: rig::providers::ollama::Client = rig::providers::ollama::Client::builder()
+                .api_key(rig::client::Nothing)
+                .base_url(&base_url)
+                .build()
+                .expect("Failed to create Ollama chat client");
+
+            let agent = client.agent(&model).preamble(preamble).build();
+            Ok(agent.chat(query, chat_history).await?)
+        }
+        "lmstudio" | _ => {
+            let port = env::var("CHAT_MODEL_PORT").unwrap_or_else(|_| "1234".to_string());
+            let api_key = env::var("CHAT_API_KEY").unwrap_or_else(|_| "lm-studio".to_string());
+            let base_url = format!("http://{}:{}/v1", host, port);
+
+            let client: rig::providers::openai::CompletionsClient = rig::providers::openai::CompletionsClient::builder()
+                .api_key(&api_key)
+                .base_url(&base_url)
+                .build()
+                .expect("Failed to create LM Studio chat client");
+
+            let agent = client.agent(&model).preamble(preamble).build();
+            Ok(agent.chat(query, chat_history).await?)
+        }
+    }
 }
 
 /// Retrieve relevant context from the vector store
@@ -110,15 +136,8 @@ pub async fn generate_rag_response(
         context_str
     );
 
-    // Generate response using rig agent with chat history
-    let client = get_chat_client();
-    let agent = client
-        .agent(RAG_MODEL)
-        .preamble(&preamble)
-        .build();
-
     let t = Instant::now();
-    let answer = agent.chat(query, chat_history.clone()).await?;
+    let answer = chat_with_provider(query, &preamble, chat_history.clone()).await?;
     let llm_time = t.elapsed().as_secs_f64();
 
     // Append this turn to history
