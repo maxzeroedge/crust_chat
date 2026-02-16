@@ -109,8 +109,25 @@ async fn chat_operation() -> anyhow::Result<()> {
         println!("\nSearching knowledge base...");
 
         match generate_rag_response(&pool, input, &mut chat_history).await {
-            Ok(response) => {
-                println!("\nAssistant: {}\n", response);
+            Ok(rag) => {
+                println!("\nAssistant: {}\n", rag.answer);
+
+                if !rag.contexts.is_empty() {
+                    println!("References:");
+                    for (i, ctx) in rag.contexts.iter().enumerate() {
+                        let source = std::path::Path::new(&ctx.source_file)
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
+                            .unwrap_or_else(|| ctx.source_file.clone());
+                        let etype = ctx.entity_type.as_deref().unwrap_or("-");
+                        let ename = ctx.entity_name.as_deref().unwrap_or("-");
+                        println!(
+                            "  [{}] {} | type: {} | name: {} | similarity: {:.4}",
+                            i + 1, source, etype, ename, ctx.similarity
+                        );
+                    }
+                    println!();
+                }
             }
             Err(e) => {
                 eprintln!("Error: {}\n", e);

@@ -10,7 +10,7 @@ use crate::handler::data_loader::embed_query;
 
 const RAG_MODEL: &str = "gemma3:12b-it-q4_K_M";
 const TOP_K: i64 = 10;
-const MIN_SIMILARITY: f64 = 0.3;
+const MIN_SIMILARITY: f64 = 0.5;
 const RAG_PREAMBLE: &str = r#"You are a helpful assistant that answers questions based on the provided context.
 Use the context to answer the user's question. If the context doesn't contain relevant information, say so.
 Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc. You must not invent anything new"#;
@@ -76,19 +76,28 @@ fn build_context_string(contexts: &[SearchResult]) -> String {
     context_text
 }
 
+/// RAG response paired with the contexts used
+pub struct RagResponse {
+    pub answer: String,
+    pub contexts: Vec<SearchResult>,
+}
+
 /// Generate a response using RAG with conversation history
 pub async fn generate_rag_response(
     pool: &PgPool,
     query: &str,
     chat_history: &mut Vec<Message>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<RagResponse> {
     let total_start = Instant::now();
 
     // Retrieve relevant context
     let (contexts, embed_time, search_time) = retrieve_context(pool, query).await?;
 
     if contexts.is_empty() {
-        return Ok("No relevant context found in the knowledge base.".to_string());
+        return Ok(RagResponse {
+            answer: "No relevant context found in the knowledge base.".to_string(),
+            contexts: vec![],
+        });
     }
 
     // Build context string
@@ -109,12 +118,12 @@ pub async fn generate_rag_response(
         .build();
 
     let t = Instant::now();
-    let response = agent.chat(query, chat_history.clone()).await?;
+    let answer = agent.chat(query, chat_history.clone()).await?;
     let llm_time = t.elapsed().as_secs_f64();
 
     // Append this turn to history
     chat_history.push(Message::user(query));
-    chat_history.push(Message::assistant(&response));
+    chat_history.push(Message::assistant(&answer));
 
     let total_time = total_start.elapsed().as_secs_f64();
     println!(
@@ -122,5 +131,5 @@ pub async fn generate_rag_response(
         embed_time, search_time, llm_time, total_time
     );
 
-    Ok(response)
+    Ok(RagResponse { answer, contexts })
 }
