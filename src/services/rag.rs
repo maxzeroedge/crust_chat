@@ -1,6 +1,6 @@
 use rig::providers::ollama::Client;
 use rig::client::{Nothing, CompletionClient};
-use rig::completion::Prompt;
+use rig::completion::{Chat, Message};
 use sqlx::postgres::PgPool;
 use std::env;
 use std::time::Instant;
@@ -9,10 +9,11 @@ use crate::db::vector_store::{search_similar, SearchResult};
 use crate::handler::data_loader::embed_query;
 
 const RAG_MODEL: &str = "gemma3:12b-it-q4_K_M";
-const TOP_K: i64 = 5;
+const TOP_K: i64 = 10;
+const MIN_SIMILARITY: f64 = 0.3;
 const RAG_PREAMBLE: &str = r#"You are a helpful assistant that answers questions based on the provided context.
 Use the context to answer the user's question. If the context doesn't contain relevant information, say so.
-Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc."#;
+Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc. You must not invent anything new"#;
 
 /// Get chat Ollama client with configured host
 fn get_chat_client() -> Client {
@@ -36,7 +37,7 @@ pub async fn retrieve_context(pool: &PgPool, query: &str) -> anyhow::Result<(Vec
     let embed_time = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
-    let results = search_similar(pool, query_embedding, TOP_K).await?;
+    let results = search_similar(pool, query_embedding, TOP_K, MIN_SIMILARITY).await?;
     let search_time = t.elapsed().as_secs_f64();
 
     Ok((results, embed_time, search_time))
@@ -50,17 +51,24 @@ fn build_context_string(contexts: &[SearchResult]) -> String {
         let source = if ctx.source_file.is_empty() {
             "unknown".to_string()
         } else {
-            // Extract just the filename from the path
             std::path::Path::new(&ctx.source_file)
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| ctx.source_file.clone())
         };
+
+        let entity_info = match (&ctx.entity_type, &ctx.entity_name) {
+            (Some(etype), Some(ename)) => format!(", type: {}, name: {}", etype, ename),
+            (Some(etype), None) => format!(", type: {}", etype),
+            _ => String::new(),
+        };
+
         context_text.push_str(&format!(
-            "[{}] (source: {}, similarity: {:.2})\n{}\n\n",
+            "[{}] (source: {}, similarity: {:.2}{})\n{}\n\n",
             i + 1,
             source,
             ctx.similarity,
+            entity_info,
             ctx.content
         ));
     }
@@ -68,8 +76,12 @@ fn build_context_string(contexts: &[SearchResult]) -> String {
     context_text
 }
 
-/// Generate a response using RAG
-pub async fn generate_rag_response(pool: &PgPool, query: &str) -> anyhow::Result<String> {
+/// Generate a response using RAG with conversation history
+pub async fn generate_rag_response(
+    pool: &PgPool,
+    query: &str,
+    chat_history: &mut Vec<Message>,
+) -> anyhow::Result<String> {
     let total_start = Instant::now();
 
     // Retrieve relevant context
@@ -89,7 +101,7 @@ pub async fn generate_rag_response(pool: &PgPool, query: &str) -> anyhow::Result
         context_str
     );
 
-    // Generate response using rig agent
+    // Generate response using rig agent with chat history
     let client = get_chat_client();
     let agent = client
         .agent(RAG_MODEL)
@@ -97,8 +109,12 @@ pub async fn generate_rag_response(pool: &PgPool, query: &str) -> anyhow::Result
         .build();
 
     let t = Instant::now();
-    let response = agent.prompt(query).await?;
+    let response = agent.chat(query, chat_history.clone()).await?;
     let llm_time = t.elapsed().as_secs_f64();
+
+    // Append this turn to history
+    chat_history.push(Message::user(query));
+    chat_history.push(Message::assistant(&response));
 
     let total_time = total_start.elapsed().as_secs_f64();
     println!(

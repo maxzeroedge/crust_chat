@@ -230,36 +230,46 @@ pub struct SearchResult {
     pub id: i64,
     pub content: String,
     pub source_file: String,
+    pub entity_type: Option<String>,
+    pub entity_name: Option<String>,
     pub similarity: f64,
 }
 
 /// Search for similar vectors (for RAG retrieval)
+/// Only returns results above the minimum similarity threshold.
 pub async fn search_similar(
     pool: &PgPool,
     query_embedding: Vec<f32>,
     limit: i64,
+    min_similarity: f64,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let vector = Vector::from(query_embedding);
 
-    let rows: Vec<(i64, String, String, f64)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, Option<String>, Option<String>, f64)> = sqlx::query_as(
         r#"
-        SELECT id, content, COALESCE(source_file, '') as source_file, 1 - (embedding <=> $1) as similarity
+        SELECT id, content, COALESCE(source_file, '') as source_file,
+               entity_type, entity_name,
+               1 - (embedding <=> $1) as similarity
         FROM embeddings
+        WHERE 1 - (embedding <=> $1) >= $3
         ORDER BY embedding <=> $1
         LIMIT $2
         "#,
     )
     .bind(&vector)
     .bind(limit)
+    .bind(min_similarity)
     .fetch_all(pool)
     .await?;
 
     let results = rows
         .into_iter()
-        .map(|(id, content, source_file, similarity)| SearchResult {
+        .map(|(id, content, source_file, entity_type, entity_name, similarity)| SearchResult {
             id,
             content,
             source_file,
+            entity_type,
+            entity_name,
             similarity,
         })
         .collect();

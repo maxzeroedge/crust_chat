@@ -963,6 +963,7 @@ dependencies = [
  "serde_json",
  "simple_logger",
  "sqlx",
+ "tempfile",
  "thirtyfour",
  "tokio",
  "tree-sitter",

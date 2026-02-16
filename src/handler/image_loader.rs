@@ -25,18 +25,17 @@ pub fn detect_image(file_path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Send image to Ollama vision model and get a description
-async fn describe_image(file_path: &str) -> anyhow::Result<String> {
+/// Send image bytes to Ollama vision model and get a description
+pub async fn describe_image_bytes(image_bytes: &[u8], prompt: &str) -> anyhow::Result<String> {
     dotenvy::dotenv_override().ok();
 
     let host = env::var("VISION_MODEL_HOST").unwrap_or_else(|_| "localhost".to_string());
     let port = env::var("VISION_MODEL_PORT").unwrap_or_else(|_| "11434".to_string());
     let model = env::var("VISION_MODEL")?;
 
-    let image_bytes = std::fs::read(file_path)?;
     let encoded = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &image_bytes,
+        image_bytes,
     );
 
     let url = format!("http://{}:{}/api/chat", host, port);
@@ -44,7 +43,7 @@ async fn describe_image(file_path: &str) -> anyhow::Result<String> {
         "model": model,
         "messages": [{
             "role": "user",
-            "content": VISION_PROMPT,
+            "content": prompt,
             "images": [encoded]
         }],
         "stream": false
@@ -66,12 +65,18 @@ async fn describe_image(file_path: &str) -> anyhow::Result<String> {
     Ok(description)
 }
 
+/// Send image file to Ollama vision model and get a description
+async fn describe_image(file_path: &str) -> anyhow::Result<String> {
+    let image_bytes = std::fs::read(file_path)?;
+    describe_image_bytes(&image_bytes, VISION_PROMPT).await
+}
+
 /// Extract text from image using extractous OCR
 fn ocr_image(file_path: &str) -> anyhow::Result<String> {
     let extractor = Extractor::new();
     match extractor.extract_file_to_string(file_path) {
         Ok((text, _metadata)) => Ok(text.trim().to_string()),
-        Err(_) => Ok(String::new()), // OCR may fail on some images, that's ok
+        Err(_) => Ok(String::new()),
     }
 }
 

@@ -4,6 +4,7 @@ use rig::client::{Nothing, EmbeddingsClient};
 use rig::embeddings::{EmbeddingsBuilder, Embedding};
 use rig::OneOrMany;
 use std::env;
+use std::path::Path;
 use std::time::Instant;
 use std::io::{self, Write};
 
@@ -30,16 +31,124 @@ fn get_embedding_client() -> Client {
 /// Embedding result: document text paired with its embedding(s)
 pub type EmbeddingResult = Vec<(String, OneOrMany<Embedding>)>;
 
-/// Load text from a file
+/// Load text from a file. Tries OCR+text extraction first, falls back to no-OCR on failure.
 pub fn load_data(file_path: &str) -> anyhow::Result<String> {
-    let extractor = Extractor::new()
+    let extractor_with_ocr = Extractor::new()
         .set_pdf_config(
             PdfParserConfig::new()
                 .set_ocr_strategy(PdfOcrStrategy::OCR_AND_TEXT_EXTRACTION),
         );
-    let (text, metadata) = extractor.extract_file_to_string(file_path)?;
-    println!("Loaded file with metadata: {:?}", metadata);
-    Ok(text)
+
+    match extractor_with_ocr.extract_file_to_string(file_path) {
+        Ok((text, metadata)) => {
+            println!("Loaded file (with OCR) metadata: {:?}", metadata);
+            Ok(text)
+        }
+        Err(e) => {
+            println!("OCR extraction failed ({}), retrying without OCR...", e);
+            let extractor_no_ocr = Extractor::new()
+                .set_pdf_config(
+                    PdfParserConfig::new()
+                        .set_ocr_strategy(PdfOcrStrategy::NO_OCR),
+                );
+            let (text, metadata) = extractor_no_ocr.extract_file_to_string(file_path)?;
+            println!("Loaded file (no OCR) metadata: {:?}", metadata);
+            Ok(text)
+        }
+    }
+}
+
+/// Check if a file is a PDF
+fn is_pdf(file_path: &str) -> bool {
+    Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
+}
+
+const PDF_VISION_PROMPT: &str = "Extract all text from this page image. Include headings, paragraphs, \
+    code snippets, table contents, figure captions, and any other visible text. \
+    Preserve the reading order and structure. Output only the extracted text.";
+
+/// Convert PDF pages to images using pdftoppm and run vision model OCR on each page
+async fn pdf_vision_ocr(file_path: &str) -> anyhow::Result<String> {
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_prefix = tmp_dir.path().join("page");
+
+    // Convert PDF to PNG images (one per page)
+    print!("Converting PDF to images...  ");
+    io::stdout().flush().ok();
+    let start = Instant::now();
+
+    let output = std::process::Command::new("pdftoppm")
+        .arg("-png")
+        .arg("-r")
+        .arg("200") // 200 DPI - good balance of quality vs size
+        .arg(file_path)
+        .arg(tmp_prefix.to_str().unwrap())
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("pdftoppm failed: {}", stderr);
+    }
+
+    // Collect page image files (sorted by name = page order)
+    let mut page_files: Vec<_> = std::fs::read_dir(tmp_dir.path())?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("png"))
+        .collect();
+    page_files.sort();
+
+    println!(
+        "{:.2}s ({} pages)",
+        start.elapsed().as_secs_f64(),
+        page_files.len()
+    );
+
+    if page_files.is_empty() {
+        return Ok(String::new());
+    }
+
+    // Process each page with vision model
+    let mut all_text = String::new();
+    let total_pages = page_files.len();
+
+    for (i, page_path) in page_files.iter().enumerate() {
+        print!(
+            "\rVision OCR page {}/{}...      ",
+            i + 1,
+            total_pages
+        );
+        io::stdout().flush().ok();
+        let start = Instant::now();
+
+        let image_bytes = std::fs::read(page_path)?;
+        let description = crate::handler::image_loader::describe_image_bytes(
+            &image_bytes,
+            PDF_VISION_PROMPT,
+        )
+        .await?;
+
+        println!(
+            "\rVision OCR page {}/{}...      {:.2}s ({} chars)",
+            i + 1,
+            total_pages,
+            start.elapsed().as_secs_f64(),
+            description.len()
+        );
+
+        if !description.is_empty() {
+            all_text.push_str(&format!("[Page {}]\n", i + 1));
+            all_text.push_str(&description);
+            all_text.push_str("\n\n");
+        }
+    }
+
+    // tmp_dir is dropped here, cleaning up images
+    Ok(all_text)
 }
 
 /// Split text into chunks for embedding
@@ -90,12 +199,28 @@ pub async fn embed_query(query: &str) -> anyhow::Result<Vec<f32>> {
 
 /// Load a file and generate embeddings for its content
 pub async fn load_and_embed(file_path: &str) -> anyhow::Result<EmbeddingResult> {
-    // Load the file
+    // Load the file with extractous
     print!("Loading file...              ");
     io::stdout().flush().ok();
     let start = Instant::now();
-    let text = load_data(file_path)?;
+    let mut text = load_data(file_path)?;
     println!("{:.2}s ({} chars)", start.elapsed().as_secs_f64(), text.len());
+
+    // For PDFs, also run vision model OCR on each page
+    if is_pdf(file_path) {
+        match pdf_vision_ocr(file_path).await {
+            Ok(vision_text) if !vision_text.is_empty() => {
+                println!(
+                    "Vision OCR total:            {} chars",
+                    vision_text.len()
+                );
+                text.push_str("\n\n[Vision OCR]\n");
+                text.push_str(&vision_text);
+            }
+            Ok(_) => println!("Vision OCR: no text extracted"),
+            Err(e) => println!("Vision OCR failed ({}), continuing with extractous text", e),
+        }
+    }
 
     // Chunk the text
     print!("Chunking text...             ");

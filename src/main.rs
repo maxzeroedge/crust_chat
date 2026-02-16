@@ -1,7 +1,8 @@
 use cli_chat::models::chat_ollama::Message as OllamaMessage;
 use cli_chat::services::chat::loop_chat;
 use cli_chat::handler::data_loader::load_embed_and_store;
-use cli_chat::services::rag::generate_rag_response;
+use cli_chat::services::rag::{generate_rag_response, retrieve_context};
+use rig::completion::Message;
 use cli_chat::db::vector_store::{init_pool, init_schema};
 use cli_chat::db::graph_store::init_graph;
 
@@ -15,13 +16,15 @@ struct Cli {
     path: Option<std::path::PathBuf>,
     #[arg(short, long, default_value_t = false)]
     force: bool,
+    #[arg(short, long)]
+    query: Option<String>,
 }
 
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
 
-    let Cli { operation, path, force } = Cli::parse();
+    let Cli { operation, path, force, query } = Cli::parse();
     println!("operation: {}", operation);
 
     // Verify database connections on startup
@@ -34,8 +37,12 @@ async fn main() -> anyhow::Result<()> {
             let file_path = path.ok_or_else(|| anyhow::anyhow!("`path` is required when operation is `loader`"))?;
             loader_operation(file_path, force).await
         }
+        "search" => {
+            let q = query.ok_or_else(|| anyhow::anyhow!("`query` (-q) is required when operation is `search`"))?;
+            search_operation(&q).await
+        }
         _ => {
-            println!("Use simple, chat, or loader as operation");
+            println!("Use simple, chat, loader, or search as operation");
             Ok(())
         },
     }
@@ -80,6 +87,8 @@ async fn chat_operation() -> anyhow::Result<()> {
 
     println!("RAG Chat started. Type 'exit' or 'quit' to end.\n");
 
+    let mut chat_history: Vec<Message> = Vec::new();
+
     loop {
         print!("> ");
         io::stdout().flush()?;
@@ -99,7 +108,7 @@ async fn chat_operation() -> anyhow::Result<()> {
 
         println!("\nSearching knowledge base...");
 
-        match generate_rag_response(&pool, input).await {
+        match generate_rag_response(&pool, input, &mut chat_history).await {
             Ok(response) => {
                 println!("\nAssistant: {}\n", response);
             }
@@ -107,6 +116,42 @@ async fn chat_operation() -> anyhow::Result<()> {
                 eprintln!("Error: {}\n", e);
             }
         }
+    }
+
+    Ok(())
+}
+
+async fn search_operation(query: &str) -> anyhow::Result<()> {
+    let pool = init_pool().await?;
+    init_schema(&pool).await?;
+
+    println!("Query: {}\n", query);
+
+    let (results, embed_time, search_time) = retrieve_context(&pool, query).await?;
+
+    println!("Found {} results (embed: {:.2}s, search: {:.2}s)\n",
+        results.len(), embed_time, search_time);
+
+    if results.is_empty() {
+        println!("No results above similarity threshold.");
+        return Ok(());
+    }
+
+    for (i, r) in results.iter().enumerate() {
+        let etype = r.entity_type.as_deref().unwrap_or("-");
+        let ename = r.entity_name.as_deref().unwrap_or("-");
+        let source = std::path::Path::new(&r.source_file)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| r.source_file.clone());
+
+        println!("[{}] similarity: {:.4} | type: {} | name: {} | source: {}",
+            i + 1, r.similarity, etype, ename, source);
+
+        // Show truncated content preview
+        let preview: String = r.content.chars().take(200).collect();
+        let ellipsis = if r.content.len() > 200 { "..." } else { "" };
+        println!("    {}{}\n", preview.replace('\n', "\n    "), ellipsis);
     }
 
     Ok(())

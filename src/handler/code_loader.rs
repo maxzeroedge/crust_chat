@@ -78,11 +78,16 @@ pub async fn load_code_and_store(
         delete_file_entities(&graph, file_path).await?;
     }
 
-    // Embed entities (skip File entity and empty content)
+    // Embed entities (skip File, Import, and short/empty content)
+    const MIN_CONTENT_LEN: usize = 50;
     let embeddable: Vec<_> = parse_result
         .entities
         .iter()
-        .filter(|e| e.entity_type != EntityType::File && !e.content.is_empty())
+        .filter(|e| {
+            e.entity_type != EntityType::File
+                && e.entity_type != EntityType::Import
+                && e.content.len() >= MIN_CONTENT_LEN
+        })
         .collect();
 
     let mut total_stored = 0;
