@@ -78,6 +78,21 @@ pub async fn load_code_and_store(
         delete_file_entities(&graph, file_path).await?;
     }
 
+    // Collect file-level imports to prepend to each entity's content
+    let imports_block: String = parse_result
+        .entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Import)
+        .map(|e| e.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let context_header = if imports_block.is_empty() {
+        format!("// From {}\n", file_path)
+    } else {
+        format!("// From {}\n{}\n\n", file_path, imports_block)
+    };
+
     // Embed entities (skip File, Import, and short/empty content)
     const MIN_CONTENT_LEN: usize = 50;
     let embeddable: Vec<_> = parse_result
@@ -102,7 +117,10 @@ pub async fn load_code_and_store(
         io::stdout().flush().ok();
 
         let start = Instant::now();
-        let texts: Vec<String> = batch.iter().map(|e| e.content.clone()).collect();
+        let texts: Vec<String> = batch
+            .iter()
+            .map(|e| format!("{}{}", context_header, e.content))
+            .collect();
         let embeddings = embed_texts(texts).await?;
 
         // Store each embedding with its entity metadata

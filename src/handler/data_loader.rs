@@ -151,13 +151,66 @@ async fn pdf_vision_ocr(file_path: &str) -> anyhow::Result<String> {
     Ok(all_text)
 }
 
-/// Split text into chunks for embedding
+/// Split text into chunks for embedding, preserving paragraph and line boundaries.
+/// Splits on double-newlines first to get logical blocks, then accumulates blocks
+/// until approaching `chunk_size`. Falls back to line-boundary splitting for
+/// blocks that exceed `chunk_size` on their own.
 pub fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
-    text.chars()
-        .collect::<Vec<_>>()
-        .chunks(chunk_size)
-        .map(|chunk| chunk.iter().collect())
-        .collect()
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for block in blocks {
+        let block = block.trim();
+        if block.is_empty() {
+            continue;
+        }
+
+        // If a single block exceeds chunk_size, split it at line boundaries
+        if block.len() > chunk_size {
+            // Flush current chunk first
+            if !current.is_empty() {
+                chunks.push(current.trim().to_string());
+                current = String::new();
+            }
+            // Split the oversized block by lines
+            let mut line_chunk = String::new();
+            for line in block.lines() {
+                if !line_chunk.is_empty() && line_chunk.len() + line.len() + 1 > chunk_size {
+                    chunks.push(line_chunk.trim().to_string());
+                    line_chunk = String::new();
+                }
+                if !line_chunk.is_empty() {
+                    line_chunk.push('\n');
+                }
+                line_chunk.push_str(line);
+            }
+            if !line_chunk.is_empty() {
+                chunks.push(line_chunk.trim().to_string());
+            }
+            continue;
+        }
+
+        // Check if adding this block would exceed chunk_size
+        let separator_len = if current.is_empty() { 0 } else { 2 }; // "\n\n"
+        if !current.is_empty() && current.len() + separator_len + block.len() > chunk_size {
+            chunks.push(current.trim().to_string());
+            current = String::new();
+        }
+
+        if !current.is_empty() {
+            current.push_str("\n\n");
+        }
+        current.push_str(block);
+    }
+
+    if !current.is_empty() {
+        chunks.push(current.trim().to_string());
+    }
+
+    // Filter out empty chunks
+    chunks.retain(|c| !c.is_empty());
+    chunks
 }
 
 /// Generate embeddings for text chunks
