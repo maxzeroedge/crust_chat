@@ -7,11 +7,23 @@ use std::time::Instant;
 use crate::db::vector_store::{search_similar, SearchResult};
 use crate::handler::data_loader::embed_query;
 
-const TOP_K: i64 = 10;
+const FETCH_K: i64 = 20;   // Fetch more candidates for reranking
+const TOP_K: usize = 5;    // Return top K after reranking (fewer = more focused context)
 const MIN_SIMILARITY: f64 = 0.5;
+
+// Boost factor for code entity types during reranking
+const CODE_BOOST: f64 = 0.15;
 const RAG_PREAMBLE: &str = r#"You are a helpful assistant that answers questions based on the provided context.
 Use the context to answer the user's question. If the context doesn't contain relevant information, say so.
-Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc. You must not invent anything new"#;
+Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc.
+
+When the user asks how to do something, provide a working code example. Follow these rules strictly:
+- Use ONLY the APIs, types, function signatures, and patterns that appear in the context snippets. The context is the source of truth.
+- Do NOT substitute your own knowledge of libraries or APIs. If a function call or type is not in the context, do not use it.
+- You may combine code from multiple context snippets into a single coherent example.
+- You may add glue code (main function, variable bindings, print statements) to make the example complete and runnable.
+- Include all necessary imports by using the import statements from the context snippets.
+- If the context does not contain enough information to write a complete working example, clearly state what is missing."#;
 
 /// Chat with the LLM using the configured provider (ollama or lmstudio)
 pub async fn chat_with_provider(
@@ -56,6 +68,80 @@ pub async fn chat_with_provider(
     }
 }
 
+/// Code entity types that get a similarity boost during reranking
+fn is_code_entity(entity_type: &Option<String>) -> bool {
+    match entity_type.as_deref() {
+        Some(t) => matches!(
+            t,
+            "function" | "method" | "struct" | "class" | "enum" | "trait"
+                | "interface" | "module" | "constant" | "type_alias"
+        ),
+        None => false,
+    }
+}
+
+/// Rerank results: boost code entities, deduplicate overlapping content, take top K
+fn rerank(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
+    // Score each result: base similarity + code boost
+    let mut scored: Vec<(f64, usize)> = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let boost = if is_code_entity(&r.entity_type) { CODE_BOOST } else { 0.0 };
+            (r.similarity + boost, i)
+        })
+        .collect();
+
+    // Sort by boosted score descending
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Deduplicate: skip results whose content largely overlaps with an already-picked result
+    let mut picked: Vec<usize> = Vec::new();
+    let mut seen_content: Vec<String> = Vec::new();
+
+    for (_, idx) in &scored {
+        if picked.len() >= TOP_K {
+            break;
+        }
+        let content = &results[*idx].content;
+        // Check for significant overlap with already-picked results
+        let is_duplicate = seen_content.iter().any(|existing| {
+            // Use the shorter of the two as reference length
+            let min_len = content.len().min(existing.len());
+            if min_len == 0 {
+                return true;
+            }
+            // Check if first 200 chars match (fast overlap check)
+            let check_len = 200.min(min_len);
+            content[..check_len] == existing[..check_len]
+        });
+
+        if !is_duplicate {
+            picked.push(*idx);
+            seen_content.push(content.clone());
+        }
+    }
+
+    // Extract in picked order
+    // Mark indices to take, preserving the reranked order
+    let mut reranked = Vec::with_capacity(picked.len());
+    for idx in picked {
+        // We need to take ownership; use a placeholder swap
+        let mut placeholder = SearchResult {
+            id: 0,
+            content: String::new(),
+            source_file: String::new(),
+            entity_type: None,
+            entity_name: None,
+            similarity: 0.0,
+        };
+        std::mem::swap(&mut results[idx], &mut placeholder);
+        reranked.push(placeholder);
+    }
+
+    reranked
+}
+
 /// Retrieve relevant context from the vector store
 pub async fn retrieve_context(pool: &PgPool, query: &str) -> anyhow::Result<(Vec<SearchResult>, f64, f64)> {
     let t = Instant::now();
@@ -63,10 +149,11 @@ pub async fn retrieve_context(pool: &PgPool, query: &str) -> anyhow::Result<(Vec
     let embed_time = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
-    let results = search_similar(pool, query_embedding, TOP_K, MIN_SIMILARITY).await?;
+    let results = search_similar(pool, query_embedding, FETCH_K, MIN_SIMILARITY).await?;
+    let reranked = rerank(results);
     let search_time = t.elapsed().as_secs_f64();
 
-    Ok((results, embed_time, search_time))
+    Ok((reranked, embed_time, search_time))
 }
 
 /// Build context string from search results

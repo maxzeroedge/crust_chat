@@ -3,6 +3,7 @@ use cli_chat::services::chat::loop_chat;
 use cli_chat::handler::data_loader::load_embed_and_store;
 use cli_chat::services::rag::{generate_rag_response, retrieve_context};
 use cli_chat::services::code_agent;
+use cli_chat::services::project_agent;
 use rig::completion::Message;
 use cli_chat::db::vector_store::{init_pool, init_schema};
 use cli_chat::db::graph_store::init_graph;
@@ -104,7 +105,8 @@ async fn chat_operation() -> anyhow::Result<()> {
     println!("RAG Chat started. Type 'exit' or 'quit' to end.");
     println!("  /load <path>    - load a file or directory into the knowledge base");
     println!("  /reload <path>  - force reload a file or directory (re-index)");
-    println!("  /save <path>    - extract code from last response and save to file\n");
+    println!("  /save <path>    - extract code from last response and save to file");
+    println!("  /create [path]  - create a project from last response, verify it builds\n");
 
     let mut chat_history: Vec<Message> = Vec::new();
     let mut last_response: Option<String> = None;
@@ -185,6 +187,22 @@ async fn chat_operation() -> anyhow::Result<()> {
                     }
                 }
                 None => println!("No previous response to extract code from.\n"),
+            }
+            continue;
+        }
+
+        // Handle /create command
+        if input.starts_with("/create") {
+            let path = input.strip_prefix("/create").unwrap().trim();
+            let output_dir = if path.is_empty() { None } else { Some(path) };
+            match &last_response {
+                Some(resp) => {
+                    match project_agent::create_and_verify(resp, output_dir).await {
+                        Ok(dir) => println!("Project ready at: {}\n", dir.display()),
+                        Err(e) => eprintln!("Project creation failed: {}\n", e),
+                    }
+                }
+                None => println!("No previous response to create project from.\n"),
             }
             continue;
         }

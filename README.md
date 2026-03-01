@@ -54,14 +54,14 @@ EMBEDDING_MODEL=qwen3-embedding:0.6b
 CHAT_PROVIDER=ollama             # "lmstudio" or "ollama"
 CHAT_MODEL_HOST=<your_chat_host>
 CHAT_MODEL_PORT=11434            # 1234 for lmstudio, 11434 for ollama
-CHAT_MODEL=gemma3:12b-it-q4_K_M
+CHAT_MODEL=qwen2.5-coder:7b
 CHAT_API_KEY=<your_api_key>      # only used by lmstudio provider
 
 # ── Vision Model ──────────────────────────────────────
 VISION_PROVIDER=ollama           # "lmstudio" or "ollama"
 VISION_MODEL_HOST=<your_vision_host>
 VISION_MODEL_PORT=11434          # 1234 for lmstudio, 11434 for ollama
-VISION_MODEL=gemma3:12b-it-q4_K_M
+VISION_MODEL=qwen3-vl:8b         # gemma3:12b-it-q4_K_M
 VISION_API_KEY=<your_api_key>    # only used by lmstudio provider
 ```
 

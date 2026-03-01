@@ -17,6 +17,27 @@ Rules:
 - Ensure the code compiles (add any missing closing braces, semicolons, etc.)
 - Do not invent new code — only clean and assemble what is present"#;
 
+/// Strip markdown code fences (```lang ... ```) from LLM output
+fn strip_markdown_fences(text: &str) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+
+    // Strip leading fence (e.g. ```rust, ```python, ```)
+    if let Some(first) = lines.first() {
+        if first.trim().starts_with("```") {
+            lines.remove(0);
+        }
+    }
+
+    // Strip trailing fence
+    if let Some(last) = lines.last() {
+        if last.trim() == "```" {
+            lines.pop();
+        }
+    }
+
+    lines.join("\n")
+}
+
 /// Takes an LLM response, sends it through the code cleaning agent,
 /// and writes the cleaned code to a file.
 pub async fn extract_and_save(llm_response: &str, output_path: &str) -> anyhow::Result<String> {
@@ -32,6 +53,9 @@ pub async fn extract_and_save(llm_response: &str, output_path: &str) -> anyhow::
     let cleaned = chat_with_provider(&prompt, CODE_AGENT_PREAMBLE, vec![]).await?;
 
     println!("{:.2}s", start.elapsed().as_secs_f64());
+
+    // Strip markdown fences if the LLM still included them
+    let cleaned = strip_markdown_fences(&cleaned);
 
     if cleaned.trim() == "// No code found" {
         println!("No code found in the response.");
