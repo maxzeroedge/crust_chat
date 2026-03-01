@@ -80,6 +80,21 @@ async fn simple_chat_operation() -> anyhow::Result<()> {
 
 async fn chat_operation() -> anyhow::Result<()> {
     use std::io::{self, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    // Set up Ctrl+C handler: first press cancels current operation, second press quits
+    let ctrlc_pressed = Arc::new(AtomicBool::new(false));
+    let ctrlc_flag = ctrlc_pressed.clone();
+    ctrlc::set_handler(move || {
+        if ctrlc_flag.load(Ordering::SeqCst) {
+            // Second Ctrl+C — exit immediately
+            println!("\nForce quit.");
+            std::process::exit(0);
+        }
+        ctrlc_flag.store(true, Ordering::SeqCst);
+        eprintln!("\nInterrupted. Press Ctrl+C again to quit, or type a new query.");
+    })?;
 
     // Connect to knowledge base
     println!("Connecting to knowledge base...");
@@ -87,18 +102,33 @@ async fn chat_operation() -> anyhow::Result<()> {
     init_schema(&pool).await?;
 
     println!("RAG Chat started. Type 'exit' or 'quit' to end.");
-    println!("  /save <path>  - extract code from last response and save to file");
-    println!("  /load <path>  - load a file or directory into the knowledge base\n");
+    println!("  /load <path>    - load a file or directory into the knowledge base");
+    println!("  /reload <path>  - force reload a file or directory (re-index)");
+    println!("  /save <path>    - extract code from last response and save to file\n");
 
     let mut chat_history: Vec<Message> = Vec::new();
     let mut last_response: Option<String> = None;
 
     loop {
+        // Reset Ctrl+C flag at each prompt
+        ctrlc_pressed.store(false, Ordering::SeqCst);
+
         print!("> ");
         io::stdout().flush()?;
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => {
+                // Ctrl+C during read_line can cause an interrupted error
+                if e.kind() == io::ErrorKind::Interrupted {
+                    println!();
+                    continue;
+                }
+                return Err(e.into());
+            }
+        }
         let input = input.trim();
 
         if input.is_empty() {
@@ -108,6 +138,21 @@ async fn chat_operation() -> anyhow::Result<()> {
         if input == "exit" || input == "quit" {
             println!("Goodbye!");
             break;
+        }
+
+        // Handle /reload command (force reload)
+        if input.starts_with("/reload") {
+            let path = input.strip_prefix("/reload").unwrap().trim();
+            if path.is_empty() {
+                println!("Usage: /reload <file_or_directory_path>\n");
+                continue;
+            }
+            let p = std::path::PathBuf::from(path);
+            match loader_operation(p, true).await {
+                Ok(_) => println!("Reload complete.\n"),
+                Err(e) => eprintln!("Reload failed: {}\n", e),
+            }
+            continue;
         }
 
         // Handle /load command
