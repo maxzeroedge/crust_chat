@@ -33,36 +33,36 @@ Create a `.env` file in the project root:
 
 ```env
 # ── Databases ──────────────────────────────────────────
-PG_HOST=localhost
-PG_PORT=5432
+PG_HOST=<your_pg_host>
+PG_PORT=<your_pg_port>
 PG_DATABASE=racl_vector
-PG_USER=postgresadmin
-PG_PASS=postgresadmin
+PG_USER=<your_pg_user>
+PG_PASS=<your_pg_password>
 
-NEO_4J_HOST=localhost
-NEO_4J_BOLT_PORT=7687
+NEO_4J_HOST=<your_neo4j_host>
+NEO_4J_BOLT_PORT=<your_neo4j_bolt_port>
 NEO_4J_DATABASE=neo4j
-NEO_4J_USER=neo4j
-NEO_4J_PASS=your_password
+NEO_4J_USER=<your_neo4j_user>
+NEO_4J_PASS=<your_neo4j_password>
 
 # ── Embedding Model (Ollama) ──────────────────────────
-EMBEDDING_MODEL_HOST=localhost
+EMBEDDING_MODEL_HOST=<your_ollama_host>
 EMBEDDING_MODEL_PORT=11434
 EMBEDDING_MODEL=qwen3-embedding:0.6b
 
 # ── Chat Model ────────────────────────────────────────
-CHAT_PROVIDER=lmstudio          # "lmstudio" or "ollama"
-CHAT_MODEL_HOST=localhost
-CHAT_MODEL_PORT=1234            # 1234 for lmstudio, 11434 for ollama
+CHAT_PROVIDER=ollama             # "lmstudio" or "ollama"
+CHAT_MODEL_HOST=<your_chat_host>
+CHAT_MODEL_PORT=11434            # 1234 for lmstudio, 11434 for ollama
 CHAT_MODEL=gemma3:12b-it-q4_K_M
-CHAT_API_KEY=lm-studio          # only used by lmstudio provider
+CHAT_API_KEY=<your_api_key>      # only used by lmstudio provider
 
 # ── Vision Model ──────────────────────────────────────
-VISION_PROVIDER=lmstudio        # "lmstudio" or "ollama"
-VISION_MODEL_HOST=localhost
-VISION_MODEL_PORT=1234          # 1234 for lmstudio, 11434 for ollama
+VISION_PROVIDER=ollama           # "lmstudio" or "ollama"
+VISION_MODEL_HOST=<your_vision_host>
+VISION_MODEL_PORT=11434          # 1234 for lmstudio, 11434 for ollama
 VISION_MODEL=gemma3:12b-it-q4_K_M
-VISION_API_KEY=lm-studio        # only used by lmstudio provider
+VISION_API_KEY=<your_api_key>    # only used by lmstudio provider
 ```
 
 ### Quick Provider Switch
@@ -116,6 +116,18 @@ cargo run -- --operation simple
 | `--force` | `-f` | Force reload of already processed files |
 | `--query` | `-q` | Search query (required for `search`) |
 
+### In-Chat Commands
+
+While in the `chat` operation, the following commands are available:
+
+| Command | Description |
+|---------|-------------|
+| `/load <path>` | Load a file or directory into the knowledge base without leaving chat |
+| `/save <path>` | Extract clean, runnable code from the last response and save to file |
+| `exit` / `quit` | End the chat session |
+
+The `/save` command uses a code cleaning agent — a second LLM pass that strips markdown formatting, explanatory text, and citations from the response, assembles code snippets into a single coherent file with imports, and writes it to disk.
+
 ## Supported File Types
 
 ### Code Files (tree-sitter AST parsing + graph storage)
@@ -164,6 +176,7 @@ RAG Chat
   ├── User query → embed → vector similarity search (PostgreSQL)
   ├── Top-K results (min similarity 0.5) → build context
   ├── Context + conversation history → LLM (lmstudio/ollama)
-  └── Response with numbered citations [1], [2], etc.
-      + printed references with source, type, name, similarity
+  ├── Response with numbered citations [1], [2], etc.
+  │   + printed references with source, type, name, similarity
+  └── /save → Code Agent (2nd LLM pass) → clean code → write to file
 ```

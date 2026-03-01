@@ -14,7 +14,7 @@ Use the context to answer the user's question. If the context doesn't contain re
 Always cite which context snippet(s) you used by referencing their numbers [1], [2], etc. You must not invent anything new"#;
 
 /// Chat with the LLM using the configured provider (ollama or lmstudio)
-async fn chat_with_provider(
+pub async fn chat_with_provider(
     query: &str,
     preamble: &str,
     chat_history: Vec<Message>,

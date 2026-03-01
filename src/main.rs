@@ -2,6 +2,7 @@ use cli_chat::models::chat_ollama::Message as OllamaMessage;
 use cli_chat::services::chat::loop_chat;
 use cli_chat::handler::data_loader::load_embed_and_store;
 use cli_chat::services::rag::{generate_rag_response, retrieve_context};
+use cli_chat::services::code_agent;
 use rig::completion::Message;
 use cli_chat::db::vector_store::{init_pool, init_schema};
 use cli_chat::db::graph_store::init_graph;
@@ -85,9 +86,12 @@ async fn chat_operation() -> anyhow::Result<()> {
     let pool = init_pool().await?;
     init_schema(&pool).await?;
 
-    println!("RAG Chat started. Type 'exit' or 'quit' to end.\n");
+    println!("RAG Chat started. Type 'exit' or 'quit' to end.");
+    println!("  /save <path>  - extract code from last response and save to file");
+    println!("  /load <path>  - load a file or directory into the knowledge base\n");
 
     let mut chat_history: Vec<Message> = Vec::new();
+    let mut last_response: Option<String> = None;
 
     loop {
         print!("> ");
@@ -106,11 +110,46 @@ async fn chat_operation() -> anyhow::Result<()> {
             break;
         }
 
+        // Handle /load command
+        if input.starts_with("/load") {
+            let path = input.strip_prefix("/load").unwrap().trim();
+            if path.is_empty() {
+                println!("Usage: /load <file_or_directory_path>\n");
+                continue;
+            }
+            let p = std::path::PathBuf::from(path);
+            match loader_operation(p, false).await {
+                Ok(_) => println!("Loading complete.\n"),
+                Err(e) => eprintln!("Loading failed: {}\n", e),
+            }
+            continue;
+        }
+
+        // Handle /save command
+        if input.starts_with("/save") {
+            let path = input.strip_prefix("/save").unwrap().trim();
+            if path.is_empty() {
+                println!("Usage: /save <file_path>\n");
+                continue;
+            }
+            match &last_response {
+                Some(resp) => {
+                    match code_agent::extract_and_save(resp, path).await {
+                        Ok(_) => {}
+                        Err(e) => eprintln!("Code extraction failed: {}\n", e),
+                    }
+                }
+                None => println!("No previous response to extract code from.\n"),
+            }
+            continue;
+        }
+
         println!("\nSearching knowledge base...");
 
         match generate_rag_response(&pool, input, &mut chat_history).await {
             Ok(rag) => {
                 println!("\nAssistant: {}\n", rag.answer);
+                last_response = Some(rag.answer.clone());
 
                 if !rag.contexts.is_empty() {
                     println!("References:");
