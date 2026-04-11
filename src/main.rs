@@ -103,7 +103,7 @@ async fn setup_operation() -> anyhow::Result<()> {
         None => {
             println!("NOT FOUND");
             println!("Attempting to install Chromium...");
-            match browser::install_browser() {
+            match browser::install_browser().await {
                 Ok(path) => println!("Chromium installed: {}", path),
                 Err(e) => {
                     eprintln!("Auto-install failed: {}", e);
