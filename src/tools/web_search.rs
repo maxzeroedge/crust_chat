@@ -6,6 +6,7 @@ use thirtyfour::prelude::*;
 use async_trait::async_trait;
 use super::base_tool::BaseTool;
 use super::tool_structs::WebSearch;
+use crate::setup::browser::find_browser;
 
 #[async_trait]
 
@@ -42,8 +43,11 @@ struct WebEngine {}
 
 impl WebEngine {
     async fn search_web(query: String) -> Result<String, Box<dyn Error + Send + Sync>> {
+        let browser_path = find_browser()
+            .ok_or("No Chrome or Chromium browser found. Run with --operation setup to install one.")?;
+
         let mut caps = DesiredCapabilities::chrome();
-        caps.set_binary("/run/current-system/sw/bin/google-chrome-stable")?; 
+        caps.set_binary(&browser_path)?;
         let driver = WebDriver::new("http://localhost:44295", caps).await?;
 
         driver.goto("https://duckduckgo.com/").await?;

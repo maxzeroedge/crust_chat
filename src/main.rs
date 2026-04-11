@@ -7,6 +7,7 @@ use cli_chat::services::project_agent;
 use rig::completion::Message;
 use cli_chat::db::vector_store::{init_pool, init_schema};
 use cli_chat::db::graph_store::init_graph;
+use cli_chat::setup::browser;
 
 use clap::Parser;
 
@@ -29,10 +30,13 @@ async fn main() -> anyhow::Result<()> {
     let Cli { operation, path, force, query } = Cli::parse();
     println!("operation: {}", operation);
 
-    // Verify database connections on startup
-    check_connections().await?;
+    // setup does its own checks; all other operations require DB connectivity
+    if operation != "setup" {
+        check_connections().await?;
+    }
 
     match operation.as_str() {
+        "setup" => setup_operation().await,
         "simple" => simple_chat_operation().await,
         "chat" => chat_operation().await,
         "loader" => {
@@ -44,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
             search_operation(&q).await
         }
         _ => {
-            println!("Use simple, chat, loader, or search as operation");
+            println!("Use setup, simple, chat, loader, or search as operation");
             Ok(())
         },
     }
@@ -63,6 +67,53 @@ async fn check_connections() -> anyhow::Result<()> {
     println!("OK");
 
     println!();
+    Ok(())
+}
+
+async fn setup_operation() -> anyhow::Result<()> {
+    println!("=== RA-CL Setup ===\n");
+
+    // Database connections
+    println!("--- Databases ---");
+    print!("Checking PostgreSQL...  ");
+    match init_pool().await {
+        Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => println!("OK"),
+            Err(e) => println!("FAIL ({})", e),
+        },
+        Err(e) => println!("FAIL ({})", e),
+    }
+
+    print!("Checking Neo4j...       ");
+    match init_graph().await {
+        Ok(graph) => match graph.run(neo4rs::query("RETURN 1")).await {
+            Ok(_) => println!("OK"),
+            Err(e) => println!("FAIL ({})", e),
+        },
+        Err(e) => println!("FAIL ({})", e),
+    }
+
+    // Browser
+    println!("\n--- Browser ---");
+    print!("Checking browser...     ");
+    match browser::find_browser() {
+        Some(path) => {
+            println!("OK ({})", path);
+        }
+        None => {
+            println!("NOT FOUND");
+            println!("Attempting to install Chromium...");
+            match browser::install_browser() {
+                Ok(path) => println!("Chromium installed: {}", path),
+                Err(e) => {
+                    eprintln!("Auto-install failed: {}", e);
+                    eprintln!("Please install Chromium or Google Chrome manually.");
+                }
+            }
+        }
+    }
+
+    println!("\nSetup complete.");
     Ok(())
 }
 
